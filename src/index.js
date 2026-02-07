@@ -5,7 +5,6 @@ const saveNotes = document.getElementById("save-notes-btn");
 const clearNotes = document.getElementById("clear-notes-btn");
 const clearAllNotes = document.getElementById("clear-all-saved-notes-btn");
 const loadNotes = document.getElementById("load-all-notes-btn");
-const a = document.getElementById("a");
 
 const addNoteFn = (txt) => {
   const note = document.createElement("div");
@@ -57,7 +56,8 @@ clearAllNotes.addEventListener("click", () => {
 loadNotes.addEventListener("click", () => {
   const savedNotes = JSON.parse(localStorage.getItem("notes"));
   if (savedNotes) {
-    a.innerHTML = saveNotestes.map((note) => `<div>${note}</div>`).join("");
+    addedNotes.innerHTML = null;
+    savedNotes.forEach((note) => addNoteFn(note));
     alert("Notes loaded!");
   } else {
     alert("No saved notes found.");
