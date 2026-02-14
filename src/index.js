@@ -5,18 +5,28 @@ const saveNotes = document.getElementById("save-notes-btn");
 const clearNotes = document.getElementById("clear-notes-btn");
 const clearAllNotes = document.getElementById("clear-all-saved-notes-btn");
 const loadNotes = document.getElementById("load-all-notes-btn");
+const savedCountEl = document.getElementById("saved-count");
+const addedCountEl = document.getElementById("added-count");
+const liveIndicator = document.getElementById("live-indicator");
+
+// Add pulse animation to count badge
+const pulseCount = (el) => {
+  if (el) {
+    el.classList.add("count-pulse");
+    setTimeout(() => el.classList.remove("count-pulse"), 600);
+  }
+};
 
 const addNoteFn = (txt) => {
   const note = document.createElement("div");
-  const text = noteInput.value;
-  if (txt.trim() === "" || txt === " ") {
+  note.className = "note-item";
+  if (typeof txt !== "string" || txt.trim() === "") {
     alert("Please enter a note.");
     return;
   }
   note.textContent = txt;
-  addedNotes.style.backgroundColor = "blue";
-  addedNotes.style.border = "white solid 1px";
   addedNotes.appendChild(note);
+  refreshAddedCount();
 };
 
 addNote.addEventListener("click", () => {
@@ -27,39 +37,190 @@ addNote.addEventListener("click", () => {
 saveNotes.addEventListener("click", () => {
   const notes = addedNotes.querySelectorAll("div");
   const notesArray = Array.from(notes).map((note) => note.textContent);
-  localStorage.setItem("notes", JSON.stringify(notesArray));
-  alert("Notes saved!");
+  
+  if (notesArray.length === 0) {
+    alert("No notes to save!");
+    return;
+  }
+
+  // try saving to remote server first; fall back to localStorage
+  (async () => {
+    // First, fetch current global saved notes from server
+    let globalNotes = [];
+    try {
+      const res = await fetch("/api/notes");
+      if (res.ok) globalNotes = await res.json();
+    } catch (e) {}
+
+    // Append new notes to global notes
+    const allNotes = [...globalNotes, ...notesArray];
+
+    const body = await saveToServer(allNotes);
+    if (body) {
+      alert("Notes saved to server!");
+      if (savedCountEl && typeof body.saved === "number") {
+        savedCountEl.textContent = body.saved;
+        pulseCount(savedCountEl);
+      }
+      // Keep notes visible - don't clear them
+      noteInput.value = "";
+    } else {
+      alert("Notes saved locally (server unavailable).");
+      localStorage.setItem("pending-notes", JSON.stringify(notesArray));
+      noteInput.value = "";
+    }
+  })();
 });
 
 window.addEventListener("load", () => {
-  const savedNotes = JSON.parse(localStorage.getItem("notes"));
-  if (savedNotes) {
-    savedNotes.forEach((note) => addNoteFn(note));
-  }
+  // On load, fetch the global saved count from server and clear the locally added section
+  addedNotes.innerHTML = "";
+  fetchGlobalSavedCount();
+  refreshAddedCount();
 });
 
 clearNotes.addEventListener("click", () => {
-  localStorage.removeItem("notes");
-  addedNotes.innerHTML = null;
+  // Clear only the locally added notes section
+  addedNotes.innerHTML = "";
   alert("Notes cleared!");
+  refreshAddedCount();
 });
 
 clearAllNotes.addEventListener("click", () => {
-  alert(
-    "Are you sure you want to clear all notes? This action cannot be undone.",
-  );
-  localStorage.clear();
-  addedNotes.innerHTML = null;
-  alert("All notes cleared!");
+  if (
+    !confirm(
+      "Are you sure you want to clear all notes? This action cannot be undone.",
+    )
+  )
+    return;
+  (async () => {
+    const body = await saveToServer([]);
+    // Clear locally added notes
+    addedNotes.innerHTML = "";
+    if (body && typeof body.saved === "number") {
+      if (savedCountEl) savedCountEl.textContent = body.saved;
+      alert("All notes cleared from server!");
+    } else {
+      alert("All notes cleared locally (server unavailable).");
+    }
+    refreshAddedCount();
+  })();
 });
 
 loadNotes.addEventListener("click", () => {
-  const savedNotes = JSON.parse(localStorage.getItem("notes"));
-  if (savedNotes) {
-    addedNotes.innerHTML = null;
-    savedNotes.forEach((note) => addNoteFn(note));
-    alert("Notes loaded!");
-  } else {
-    alert("No saved notes found.");
-  }
+  // Load all notes from server into the active editor
+  fetch("/api/notes")
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((arr) => {
+      if (Array.isArray(arr) && arr.length) {
+        addedNotes.innerHTML = "";
+        arr.forEach((n) => addNoteFn(n));
+        alert("Notes loaded from server! You can now add more or save.");
+        refreshAddedCount();
+      } else {
+        alert("No notes saved on server yet.");
+      }
+    })
+    .catch(() => {
+      alert("Could not load notes from server.");
+    });
 });
+
+// attempt to save notes to server; return true if saved remotely
+async function saveToServer(notesArray) {
+  try {
+    const res = await fetch("/api/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: notesArray }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body;
+  } catch (e) {
+    return null;
+  }
+}
+
+// poll remote counts to keep multiple browsers in sync
+function startCountPolling() {
+  setInterval(() => {
+    fetch("/api/counts")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((obj) => {
+        if (savedCountEl && typeof obj.saved === "number") {
+          savedCountEl.textContent = obj.saved;
+          pulseCount(savedCountEl);
+        }
+      })
+      .catch(() => {});
+  }, 4000);
+}
+
+// start polling but don't break if server absent
+// setup Socket.IO real-time updates if available
+try {
+  const socket = io();
+
+  socket.on("connect", () => {
+    if (liveIndicator) {
+      liveIndicator.style.opacity = "1";
+      liveIndicator.title = "Connected to server";
+    }
+  });
+
+  socket.on("disconnect", () => {
+    if (liveIndicator) {
+      liveIndicator.style.opacity = "0.4";
+      liveIndicator.title = "Disconnected - using local storage";
+    }
+  });
+
+  socket.on("counts", (obj) => {
+    if (savedCountEl && typeof obj.saved === "number") {
+      const currentCount = savedCountEl.textContent;
+      savedCountEl.textContent = obj.saved;
+      if (currentCount !== obj.saved.toString()) {
+        pulseCount(savedCountEl);
+      }
+    }
+  });
+} catch (e) {
+  // fallback to polling if socket.io is not available
+  if (liveIndicator) {
+    liveIndicator.style.opacity = "0.4";
+    liveIndicator.title = "Server unavailable - polling for updates";
+  }
+  startCountPolling();
+}
+
+// Fetch the global saved count from server
+async function fetchGlobalSavedCount() {
+  try {
+    const res = await fetch("/api/counts");
+    if (res.ok) {
+      const obj = await res.json();
+      if (savedCountEl && typeof obj.saved === "number") {
+        savedCountEl.textContent = obj.saved;
+      }
+    }
+  } catch (e) {
+    // Server unavailable, keep current count
+  }
+}
+
+function refreshAddedCount() {
+  try {
+    const nodes = addedNotes ? addedNotes.querySelectorAll("div") : [];
+    const newCount = nodes.length;
+    if (addedCountEl) {
+      const oldCount = parseInt(addedCountEl.textContent);
+      addedCountEl.textContent = newCount;
+      if (oldCount !== newCount) {
+        pulseCount(addedCountEl);
+      }
+    }
+  } catch (e) {
+    if (addedCountEl) addedCountEl.textContent = 0;
+  }
+}

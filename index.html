@@ -9,6 +9,16 @@
   <body>
     <div class="main-container">
       <h1>Keep your notes here</h1>
+      <div class="notes-meta">
+        <span id="added-count">0</span>
+        <span class="muted">added</span>
+        <span id="saved-count">0</span>
+        <span class="muted">saved</span>
+        <span class="live-indicator" id="live-indicator">
+          <span class="live-dot"></span>
+          <span>LIVE</span>
+        </span>
+      </div>
       <div id="added-notes" class="added-notes"></div>
       <div class="input-container">
         <input type="text" id="note-input" placeholder="Enter your note here" />
@@ -21,6 +31,7 @@
         <button id="load-all-notes-btn">Load All Notes</button>
       </div>
     </div>
+    <script src="/socket.io/socket.io.js"></script>
     <script src="./src/index.js"></script>
   </body>
 </html>
