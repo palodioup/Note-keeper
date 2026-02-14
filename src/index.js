@@ -62,6 +62,15 @@ saveNotes.addEventListener("click", () => {
         savedCountEl.textContent = body.saved;
         pulseCount(savedCountEl);
       }
+      // Track what this browser saved (for load/clear buttons)
+      const previouslySaved = JSON.parse(
+        localStorage.getItem("saved-to-server") || "[]"
+      );
+      const allSavedByThisBrowser = [...previouslySaved, ...notesArray];
+      localStorage.setItem(
+        "saved-to-server",
+        JSON.stringify(allSavedByThisBrowser),
+      );
       // Keep notes visible - don't clear them
       noteInput.value = "";
     } else {
@@ -89,41 +98,34 @@ clearNotes.addEventListener("click", () => {
 clearAllNotes.addEventListener("click", () => {
   if (
     !confirm(
-      "Are you sure you want to clear all notes? This action cannot be undone.",
+      "Are you sure you want to clear all notes saved in THIS browser? This only affects your browser, not the global server.",
     )
   )
     return;
-  (async () => {
-    const body = await saveToServer([]);
-    // Clear locally added notes
-    addedNotes.innerHTML = "";
-    if (body && typeof body.saved === "number") {
-      if (savedCountEl) savedCountEl.textContent = body.saved;
-      alert("All notes cleared from server!");
-    } else {
-      alert("All notes cleared locally (server unavailable).");
-    }
-    refreshAddedCount();
-  })();
+  // Clear locally saved notes for this browser
+  localStorage.removeItem("saved-to-server");
+  addedNotes.innerHTML = "";
+  alert("All notes cleared from this browser!");
+  refreshAddedCount();
 });
 
 loadNotes.addEventListener("click", () => {
-  // Load all notes from server into the active editor
-  fetch("/api/notes")
-    .then((r) => (r.ok ? r.json() : Promise.reject()))
-    .then((arr) => {
-      if (Array.isArray(arr) && arr.length) {
-        addedNotes.innerHTML = "";
-        arr.forEach((n) => addNoteFn(n));
-        alert("Notes loaded from server! You can now add more or save.");
-        refreshAddedCount();
-      } else {
-        alert("No notes saved on server yet.");
-      }
-    })
-    .catch(() => {
-      alert("Could not load notes from server.");
-    });
+  // Load notes previously saved in THIS browser from localStorage
+  const savedInThisBrowser = JSON.parse(
+    localStorage.getItem("saved-to-server") || "[]"
+  );
+  if (Array.isArray(savedInThisBrowser) && savedInThisBrowser.length) {
+    addedNotes.innerHTML = "";
+    savedInThisBrowser.forEach((n) => addNoteFn(n));
+    alert(
+      `Loaded ${savedInThisBrowser.length} notes that were previously saved in this browser!`,
+    );
+    refreshAddedCount();
+  } else {
+    alert(
+      "No notes previously saved in this browser. Add some notes and save them first!",
+    );
+  }
 });
 
 // attempt to save notes to server; return true if saved remotely
